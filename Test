@@ -1,0 +1,167 @@
+Main.java
+
+import java.io.IOException;
+import java.util.*;
+
+import org.jsoup.Connection;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
+import org.jsoup.select.Elements;
+
+public class Main {
+    public static void main(String[] args) {
+        try {
+            String startingUrl = "https://en.wikipedia.org/wiki/Open-source_intelligence";
+            Map<String, Integer> urlLevels = new HashMap<>();
+            Set<String> visitedUrls = new HashSet<>();
+            Queue<String> urlsToVisit = new LinkedList<>();
+            
+            // Add the starting URL to the queue and mark it as visited
+            urlsToVisit.add(startingUrl);
+            visitedUrls.add(startingUrl);
+            urlLevels.put(startingUrl, 0);
+            
+            // Create an instance of WordCounter to count words in web pages
+            WordCounter counter = new WordCounter("C:\\Your-Path\\en-token.bin");
+            
+            long startTime = System.currentTimeMillis();
+            
+            // Set of URLs to skip or ignore
+            Set<String> skipUrls = new HashSet<>();
+            skipUrls.add("https://en.wikipedia.org/wiki/Main_Page");
+            skipUrls.add("https://usersearch.org/updates/2021/07/28/how-to-find-anyone-online/");
+            
+            // Perform web crawling until the time limit is reached or there are no more URLs to visit
+            while ((System.currentTimeMillis() - startTime) < 5 * 60 * 1000 && !urlsToVisit.isEmpty()) {
+                String url = urlsToVisit.poll();
+                int level = urlLevels.get(url);
+                
+                // Indent the output based on the level in the URL hierarchy
+                for (int i = 0; i < level; i++) {
+                    System.out.print("  ");
+                }
+                
+                System.out.println(url + " (level " + level + ")");
+                
+                // Skip URLs that are too long
+                if (url.length() > 2000) {
+                    System.out.println("Skipping URL that is too long");
+                    continue;
+                }
+                
+                // Skip URLs in the skip list
+                if (skipUrls.contains(url)) {
+                    System.out.println("Skipping URL that is on skip list");
+                    continue;
+                }
+                
+                // Get the links from the current URL
+                Set<String> links = getLinks(url);
+                
+                // Process each link and add new URLs to the queue
+                for (String link : links) {
+                    if (!visitedUrls.contains(link)) {
+                        urlsToVisit.add(link);
+                        visitedUrls.add(link);
+                        urlLevels.put(link, level + 1);
+                    }
+                }
+                
+                // Count the words in the current URL and sort them by frequency
+                Map<String, Integer> wordCount = counter.countWords(url);
+                List<Map.Entry<String, Integer>> list = new ArrayList<>(wordCount.entrySet());
+                list.sort(Map.Entry.comparingByValue(Comparator.reverseOrder()));
+                
+                int n = 10; // Print top 10 most important words
+                
+                System.out.println("---------------");
+                
+                // Print the top words and their frequencies
+                for (int i = 0; i < n && i < list.size(); i++) {
+                    System.out.println(list.get(i).getKey());
+                }
+                
+                System.out.println("---------------");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+
+public static Set<String> getLinks(String url) throws IOException {
+    // Connect to the specified URL and set user agent and connection timeout
+    Connection connection = Jsoup.connect(url)
+            .userAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36")
+            .timeout(30 * 1000); // set connection timeout to 30 seconds
+    
+    // Retrieve the HTML document from the connection
+    Document doc = connection.get();
+    
+    // Select all anchor elements with href attribute
+    Elements links = doc.select("a[href]");
+    
+    // Set to store the extracted links
+    Set<String> result = new HashSet<String>();
+    
+    // Iterate over each anchor element and extract the absolute URL
+    for (Element link : links) {
+        String absUrl = link.absUrl("href");
+        
+        // Check if the URL starts with "http" and does not contain a fragment identifier
+        if (absUrl.startsWith("http") && !absUrl.contains("#")) {
+            result.add(absUrl);
+        }
+    }
+    
+    return result;
+	}
+}
+
+
+
+WordCounter.java
+import java.io.FileInputStream;
+import java.util.*;
+import opennlp.tools.tokenize.*;
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Element;
+
+public class WordCounter {
+    private TokenizerME tokenizer;
+    private Set<String> stopWords;
+
+    public WordCounter(String tokenizerModelPath) throws Exception {
+        // Initialize the tokenizer using the provided model path
+        TokenizerModel model = new TokenizerModel(new FileInputStream(tokenizerModelPath));
+        tokenizer = new TokenizerME(model);
+        
+        // Initialize the set of stop words
+        stopWords = new HashSet<>(Arrays.asList("a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "he", "in", "is", "it", "its", "of", "on", "that", "the", "to", "was", "were", "will", "with", "or", "this"));
+    }
+
+    public Map<String, Integer> countWords(String url) throws Exception {
+        // Connect to the URL and retrieve the HTML body
+        Element body = Jsoup.connect(url).get().body();
+        
+        // Extract the text from the HTML body
+        String text = body.text();
+        
+        // Tokenize the text into individual words
+        String[] tokens = tokenizer.tokenize(text);
+        
+        // Map to store word frequencies
+        Map<String, Integer> wordCount = new HashMap<>();
+        
+        // Count the occurrences of each word, excluding stop words and non-alphabetic tokens
+        for (String token : tokens) {
+            if (token.matches("[A-Za-z]+") && !stopWords.contains(token.toLowerCase())) {
+                wordCount.put(token.toLowerCase(), wordCount.getOrDefault(token.toLowerCase(), 0) + 1);
+            }
+        }
+        
+        return wordCount;
+    }
+}
